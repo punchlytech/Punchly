@@ -7,7 +7,7 @@ import { toTitleCase, getCurrentDate } from "@/lib/utils/formatters";
 import { generateSnagPDF } from "@/lib/utils/pdf-generator";
 import { ArrowLeft, Camera, Upload, Plus, X, Trash2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 
 interface SnagLocation {
   id: string;
@@ -22,7 +22,7 @@ interface SnagPhoto {
   preview: string;
 }
 
-export default function SnagCapturePage() {
+function SnagCapturePageContent() {
   const { user, isAuthenticated } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -480,5 +480,20 @@ export default function SnagCapturePage() {
         </footer>
       </div>
     </div>
+  );
+}
+
+export default function SnagCapturePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-zinc-900 border-r-transparent"></div>
+          <p className="mt-4 text-sm text-zinc-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SnagCapturePageContent />
+    </Suspense>
   );
 }
