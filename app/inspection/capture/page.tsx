@@ -381,7 +381,7 @@ export default function SnagCapturePage() {
 
                     {/* Hidden File Input */}
                     <input
-                      ref={(el) => (fileInputRefs.current[snagLoc.id] = el)}
+                      ref={(el) => { fileInputRefs.current[snagLoc.id] = el; }}
                       type="file"
                       accept="image/*"
                       capture="environment"
