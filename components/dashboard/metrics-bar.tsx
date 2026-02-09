@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDemoMode } from "@/lib/context/demo-mode-context";
+import { DEMO_DASHBOARD_METRICS } from "@/lib/data/mock-demo-data";
 import type { DashboardMetrics } from "@/lib/types";
 
 interface MetricsBarProps {
@@ -8,15 +10,30 @@ interface MetricsBarProps {
 }
 
 export function MetricsBar({ initialMetrics }: MetricsBarProps) {
+  const { isDemoMode } = useDemoMode();
+
   const [metrics, setMetrics] = useState<DashboardMetrics>(
     initialMetrics ?? { openIssues: 0, resolved: 0, pendingReview: 0 }
   );
   const [loading, setLoading] = useState(!initialMetrics);
 
   useEffect(() => {
-    if (initialMetrics) return;
+    // Demo mode: use mock data, skip fetch
+    if (isDemoMode) {
+      setMetrics(DEMO_DASHBOARD_METRICS);
+      setLoading(false);
+      return;
+    }
+
+    // Live mode: restore zeros if coming out of demo
+    if (initialMetrics) {
+      setMetrics(initialMetrics);
+      setLoading(false);
+      return;
+    }
 
     async function fetchMetrics() {
+      setLoading(true);
       try {
         const res = await fetch("/api/dashboard/metrics");
         if (res.ok) {
@@ -31,7 +48,7 @@ export function MetricsBar({ initialMetrics }: MetricsBarProps) {
     }
 
     fetchMetrics();
-  }, [initialMetrics]);
+  }, [isDemoMode, initialMetrics]);
 
   const stats = [
     { label: "Open Issues", value: metrics.openIssues, colorClass: "text-punchly-issue" },

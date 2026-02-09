@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/context/auth-context";
+import { useDemoMode } from "@/lib/context/demo-mode-context";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { DashboardFooter } from "@/components/dashboard/dashboard-footer";
 import { SnagSearch } from "@/components/snags/snag-search";
@@ -10,7 +11,12 @@ import {
   getProjectsWithSnagCounts,
   getSnagsByProject,
 } from "@/lib/actions/snags";
-import { ArrowLeft, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  DEMO_PROJECTS,
+  getDemoSnagsByProject,
+} from "@/lib/data/mock-demo-data";
+import type { DemoProject } from "@/lib/data/mock-demo-data";
+import { ArrowLeft, ClipboardList, ChevronDown, ChevronRight, FlaskConical } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -38,6 +44,7 @@ interface SnagRow {
 
 export default function SnagsLibraryPage() {
   const { user, isAuthenticated, loading, logout } = useAuth();
+  const { isDemoMode } = useDemoMode();
   const router = useRouter();
 
   const [projects, setProjects] = useState<ProjectFolder[]>([]);
@@ -57,9 +64,29 @@ export default function SnagsLibraryPage() {
     }
   }, [loading, isAuthenticated, router]);
 
-  // Fetch projects on mount
+  // Fetch projects on mount or when demo mode changes
   useEffect(() => {
     async function fetchProjects() {
+      setLoadingProjects(true);
+      setExpandedProject(null);
+      setSnags([]);
+      setFilteredSnags([]);
+      setSelectedSnagIds([]);
+
+      if (isDemoMode) {
+        // Use mock data
+        const mapped: ProjectFolder[] = DEMO_PROJECTS.map((p: DemoProject) => ({
+          id: p.id,
+          name: p.name,
+          snag_count: p.snag_count,
+          unit_count: p.unit_count,
+          latest_activity: p.latest_activity,
+        }));
+        setProjects(mapped);
+        setLoadingProjects(false);
+        return;
+      }
+
       try {
         const data = await getProjectsWithSnagCounts();
         setProjects(data as ProjectFolder[]);
@@ -70,7 +97,7 @@ export default function SnagsLibraryPage() {
       }
     }
     fetchProjects();
-  }, []);
+  }, [isDemoMode]);
 
   // Fetch snags when a project is expanded
   const toggleProject = async (projectId: string) => {
@@ -87,6 +114,14 @@ export default function SnagsLibraryPage() {
     setLoadingSnags(true);
     setSelectedSnagIds([]);
     setSearchQuery("");
+
+    if (isDemoMode) {
+      const demoSnags = getDemoSnagsByProject(projectId) as unknown as SnagRow[];
+      setSnags(demoSnags);
+      setFilteredSnags(demoSnags);
+      setLoadingSnags(false);
+      return;
+    }
 
     try {
       const data = await getSnagsByProject(projectId);
@@ -156,6 +191,16 @@ export default function SnagsLibraryPage() {
               Organized by project. Tap a folder to view snags.
             </p>
           </div>
+
+          {/* Demo Mode Banner */}
+          {isDemoMode && (
+            <div className="mb-6 p-3 bg-punchly-issue/10 border border-punchly-issue/25 rounded-lg flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-punchly-issue flex-shrink-0" />
+              <p className="text-xs font-medium text-punchly-issue">
+                Demo Mode — Showing virtual project data
+              </p>
+            </div>
+          )}
 
           {/* Project Folders */}
           {loadingProjects ? (
@@ -250,13 +295,20 @@ export default function SnagsLibraryPage() {
                         />
                       )}
 
-                      {/* Bulk Actions */}
-                      {isManager && selectedSnagIds.length > 0 && (
+                      {/* Bulk Actions (disabled in demo mode) */}
+                      {isManager && selectedSnagIds.length > 0 && !isDemoMode && (
                         <BulkActions
                           selectedIds={selectedSnagIds}
                           onSuccess={handleBulkCloseSuccess}
                           onCancel={() => setSelectedSnagIds([])}
                         />
+                      )}
+                      {isManager && selectedSnagIds.length > 0 && isDemoMode && (
+                        <div className="mt-4 p-3 bg-punchly-issue/10 border border-punchly-issue/25 rounded-lg text-center">
+                          <p className="text-xs text-punchly-issue font-medium">
+                            Bulk actions disabled in Demo Mode
+                          </p>
+                        </div>
                       )}
                     </div>
                   )}

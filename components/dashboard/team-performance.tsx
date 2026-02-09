@@ -1,6 +1,8 @@
 "use client";
 
 import { Users } from "lucide-react";
+import { useDemoMode } from "@/lib/context/demo-mode-context";
+import { DEMO_TEAM_PERFORMANCE } from "@/lib/data/mock-demo-data";
 import type { TeamPerformance as TeamPerformanceType } from "@/lib/types";
 
 interface TeamPerformanceProps {
@@ -18,7 +20,9 @@ const DEFAULT_DATA: TeamPerformanceType[] = [
 ];
 
 export function TeamPerformance({ data }: TeamPerformanceProps) {
-  const members = data ?? DEFAULT_DATA;
+  const { isDemoMode } = useDemoMode();
+
+  const members = isDemoMode ? DEMO_TEAM_PERFORMANCE : (data ?? DEFAULT_DATA);
 
   return (
     <div className="mb-8 p-6 bg-punchly-surface border border-punchly-border rounded-lg">

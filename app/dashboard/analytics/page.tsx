@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/context/auth-context";
+import { useDemoMode } from "@/lib/context/demo-mode-context";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { DashboardFooter } from "@/components/dashboard/dashboard-footer";
 import {
@@ -9,12 +10,18 @@ import {
   getSnagsByPriority,
 } from "@/lib/actions/analytics";
 import {
+  DEMO_KPI,
+  DEMO_CATEGORIES,
+  DEMO_PRIORITIES,
+} from "@/lib/data/mock-demo-data";
+import {
   ArrowLeft,
   BarChart3,
   CheckSquare,
   Clock,
   TrendingUp,
   AlertTriangle,
+  FlaskConical,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -38,6 +45,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function AnalyticsPage() {
   const { user, isAuthenticated, loading, logout } = useAuth();
+  const { isDemoMode } = useDemoMode();
   const router = useRouter();
 
   const [kpi, setKpi] = useState<AnalyticsKPI | null>(null);
@@ -59,6 +67,18 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     async function fetchData() {
+      setLoadingData(true);
+
+      // Demo mode: use mock data
+      if (isDemoMode) {
+        setKpi(DEMO_KPI);
+        setCategories(DEMO_CATEGORIES);
+        setPriorities(DEMO_PRIORITIES);
+        setLoadingData(false);
+        return;
+      }
+
+      // Live mode: fetch from Supabase
       try {
         const [kpiData, catData, priData] = await Promise.all([
           getAnalyticsKPI(),
@@ -75,7 +95,7 @@ export default function AnalyticsPage() {
       }
     }
     fetchData();
-  }, []);
+  }, [isDemoMode]);
 
   if (loading || !isAuthenticated || !user || !isManager) return null;
 
@@ -109,9 +129,21 @@ export default function AnalyticsPage() {
               Analytics & KPI
             </h1>
             <p className="text-punchly-text-secondary">
-              Real-time performance metrics from your Supabase data.
+              {isDemoMode
+                ? "Showing simulated performance metrics."
+                : "Real-time performance metrics from your Supabase data."}
             </p>
           </div>
+
+          {/* Demo Mode Banner */}
+          {isDemoMode && (
+            <div className="mb-6 p-3 bg-punchly-issue/10 border border-punchly-issue/25 rounded-lg flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-punchly-issue flex-shrink-0" />
+              <p className="text-xs font-medium text-punchly-issue">
+                Demo Mode — Showing simulated KPI data
+              </p>
+            </div>
+          )}
 
           {loadingData ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
