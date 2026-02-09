@@ -6,8 +6,21 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-roboto-mono);
+
+  /* Punchly Brand Colors */
+  --color-punchly-navy: var(--punchly-navy);
+  --color-punchly-blue: var(--punchly-blue);
+  --color-punchly-success: var(--punchly-success);
+  --color-punchly-warning: var(--punchly-warning);
+  --color-punchly-issue: var(--punchly-issue);
+  --color-punchly-critical: var(--punchly-critical);
+  --color-punchly-bg: var(--punchly-bg);
+  --color-punchly-surface: var(--punchly-surface);
+  --color-punchly-border: var(--punchly-border);
+  --color-punchly-text: var(--punchly-text);
+  --color-punchly-text-secondary: var(--punchly-text-secondary);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,6 +61,19 @@
 
 :root {
   --radius: 0.625rem;
+
+  /* Punchly Brand Colors */
+  --punchly-navy: #0B3C5D;
+  --punchly-blue: #1F6FA3;
+  --punchly-success: #2E7D32;
+  --punchly-warning: #F9A825;
+  --punchly-issue: #EF6C00;
+  --punchly-critical: #C62828;
+  --punchly-bg: #F7F9FB;
+  --punchly-surface: #FFFFFF;
+  --punchly-border: #E1E6EB;
+  --punchly-text: #1A1A1A;
+  --punchly-text-secondary: #5A6977;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);

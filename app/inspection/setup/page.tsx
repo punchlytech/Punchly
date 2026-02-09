@@ -26,7 +26,7 @@ export default function InspectionSetupPage() {
   // Redirect if not authenticated
   useEffect(() => {
     if (!isAuthenticated) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [isAuthenticated, router]);
 
@@ -46,24 +46,34 @@ export default function InspectionSetupPage() {
     setClientName(formatted);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Store inspection data (will be enhanced with Supabase)
-    const inspectionData = {
-      projectName,
-      unitNumber,
-      clientName,
-      inspectionDate,
-      engineerName: user?.fullName,
-      engineerUsername: user?.username,
-      createdAt: new Date().toISOString(),
-    };
+    // Generate an ID and save draft to IndexedDB for offline persistence
+    const inspectionId = crypto.randomUUID();
 
-    console.log("Inspection Setup Data:", inspectionData);
+    try {
+      const { saveInspection } = await import("@/lib/offline/inspection-store");
+      await saveInspection({
+        id: inspectionId,
+        projectName,
+        unitNumber,
+        clientName,
+        inspectionDate,
+        engineerName: user?.fullName || "Unknown",
+        locations: [],
+        status: "draft",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // IndexedDB unavailable — continue with query params only
+    }
 
-    // Navigate to snag capture page
-    router.push(`/inspection/capture?project=${encodeURIComponent(projectName)}&unit=${encodeURIComponent(unitNumber)}&client=${encodeURIComponent(clientName)}`);
+    // Navigate to capture page
+    router.push(
+      `/inspection/capture?id=${inspectionId}&project=${encodeURIComponent(projectName)}&unit=${encodeURIComponent(unitNumber)}&client=${encodeURIComponent(clientName)}`
+    );
   };
 
   if (!isAuthenticated) {
@@ -88,7 +98,7 @@ export default function InspectionSetupPage() {
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between">
               <button
-                onClick={() => router.push("/")}
+                onClick={() => router.push("/dashboard")}
                 className="flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-900 transition-colors"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -231,7 +241,7 @@ export default function InspectionSetupPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => router.push("/")}
+                onClick={() => router.push("/dashboard")}
                 className="flex-1 h-12"
               >
                 Cancel

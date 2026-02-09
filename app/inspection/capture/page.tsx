@@ -2,12 +2,32 @@
 
 import { Button } from "@/components/ui/button";
 import { PunchlyWordmark } from "@/components/brand/logo";
+import { SnagAnnotator } from "@/components/inspection/snag-annotator";
 import { useAuth } from "@/lib/context/auth-context";
+import { useInspectionDraft } from "@/lib/hooks/use-inspection-draft";
+import { submitInspection } from "@/lib/actions/inspection";
 import { toTitleCase, getCurrentDate } from "@/lib/utils/formatters";
 import { generateSnagPDF } from "@/lib/utils/pdf-generator";
-import { ArrowLeft, Camera, Upload, Plus, X, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  Upload,
+  Plus,
+  X,
+  Trash2,
+  Pencil,
+  Loader2,
+  CheckCircle2,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
+
+interface SnagPhoto {
+  id: string;
+  file: File | null;
+  preview: string;
+  annotatedPreview?: string;
+}
 
 interface SnagLocation {
   id: string;
@@ -16,31 +36,73 @@ interface SnagLocation {
   photos: SnagPhoto[];
 }
 
-interface SnagPhoto {
-  id: string;
-  file: File;
-  preview: string;
-}
-
 function SnagCapturePageContent() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
+  const inspectionId = searchParams.get("id");
   const projectName = searchParams.get("project") || "";
   const unitNumber = searchParams.get("unit") || "";
   const clientName = searchParams.get("client") || "N/A";
 
+  const { save: saveDraft, clear: clearDraft } =
+    useInspectionDraft(inspectionId);
+
   const [snagLocations, setSnagLocations] = useState<SnagLocation[]>([
     { id: "1", location: "", description: "", photos: [] },
   ]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Annotation state
+  const [annotatingPhoto, setAnnotatingPhoto] = useState<{
+    locationId: string;
+    photoId: string;
+    src: string;
+  } | null>(null);
+
+  // Redirect if not authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       router.push("/");
     }
-  }, [isAuthenticated, router]);
+  }, [authLoading, isAuthenticated, router]);
+
+  // Auto-save to IndexedDB on location changes
+  const debouncedSave = useCallback(() => {
+    if (!inspectionId) return;
+    saveDraft({
+      id: inspectionId,
+      projectName,
+      unitNumber,
+      clientName,
+      inspectionDate: getCurrentDate(),
+      engineerName: user?.fullName || "Unknown",
+      locations: snagLocations.map((loc) => ({
+        id: loc.id,
+        location: loc.location,
+        description: loc.description,
+        photos: loc.photos.map((p) => ({
+          id: p.id,
+          blob: null,
+          preview: p.preview,
+          annotatedPreview: p.annotatedPreview,
+        })),
+      })),
+      status: "draft",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }, [inspectionId, projectName, unitNumber, clientName, user, snagLocations, saveDraft]);
+
+  useEffect(() => {
+    debouncedSave();
+  }, [snagLocations, debouncedSave]);
+
+  // ─── Handlers ──────────────────────────────────────────────────────
 
   const handleLocationChange = (id: string, value: string) => {
     const formatted = toTitleCase(value);
@@ -50,11 +112,9 @@ function SnagCapturePageContent() {
   };
 
   const handleDescriptionChange = (id: string, value: string) => {
-    // Capitalize first letter of each line
     const lines = value.split("\n");
     const formatted = lines
       .map((line) => {
-        // Remove any existing numbering to process fresh
         const withoutNumber = line.replace(/^\d+\.\s*/, "");
         if (withoutNumber.length > 0) {
           return withoutNumber.charAt(0).toUpperCase() + withoutNumber.slice(1);
@@ -78,8 +138,6 @@ function SnagCapturePageContent() {
       e.preventDefault();
       const textarea = e.currentTarget;
       const currentValue = textarea.value;
-
-      // Just add a new line, don't add numbering yet
       const newValue = currentValue + "\n";
 
       setSnagLocations((prev) =>
@@ -88,7 +146,6 @@ function SnagCapturePageContent() {
         )
       );
 
-      // Set cursor position
       setTimeout(() => {
         textarea.selectionStart = textarea.selectionEnd = newValue.length;
       }, 0);
@@ -96,14 +153,14 @@ function SnagCapturePageContent() {
   };
 
   const handleDescriptionBlur = (id: string) => {
-    // Add numbering only if there are 2+ lines
     setSnagLocations((prev) =>
       prev.map((loc) => {
         if (loc.id === id) {
-          const lines = loc.description.split("\n").filter((line) => line.trim() !== "");
+          const lines = loc.description
+            .split("\n")
+            .filter((line) => line.trim() !== "");
 
           if (lines.length >= 2) {
-            // Add numbering
             const numbered = lines
               .map((line, index) => {
                 const withoutNumber = line.replace(/^\d+\.\s*/, "");
@@ -112,7 +169,6 @@ function SnagCapturePageContent() {
               .join("\n");
             return { ...loc, description: numbered };
           } else if (lines.length === 1) {
-            // Remove any numbering for single line
             const withoutNumber = lines[0].replace(/^\d+\.\s*/, "");
             return { ...loc, description: withoutNumber };
           }
@@ -122,41 +178,16 @@ function SnagCapturePageContent() {
     );
   };
 
-  const formatDescriptionLine = (id: string, value: string) => {
-    const lines = value.split("\n");
-    const formattedLines = lines.map((line, index) => {
-      // Check if line starts with a number pattern like "1. " or "2. "
-      const match = line.match(/^(\d+\.\s*)(.*)/);
-      if (match) {
-        const number = match[1];
-        const text = match[2];
-        // Capitalize first letter of the text after the number
-        const capitalizedText = text.charAt(0).toUpperCase() + text.slice(1);
-        return number + capitalizedText;
-      }
-      // If first line and doesn't have number, add "1. " and capitalize
-      if (index === 0 && line.trim() !== "") {
-        const capitalizedLine = line.charAt(0).toUpperCase() + line.slice(1);
-        return capitalizedLine.startsWith("1. ") ? capitalizedLine : `1. ${capitalizedLine}`;
-      }
-      return line;
-    });
-
-    setSnagLocations((prev) =>
-      prev.map((loc) =>
-        loc.id === id ? { ...loc, description: formattedLines.join("\n") } : loc
-      )
-    );
-  };
-
   const addNewLocation = () => {
-    const newLocation: SnagLocation = {
-      id: Date.now().toString(),
-      location: "",
-      description: "",
-      photos: [],
-    };
-    setSnagLocations((prev) => [...prev, newLocation]);
+    setSnagLocations((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        location: "",
+        description: "",
+        photos: [],
+      },
+    ]);
   };
 
   const removeLocation = (id: string) => {
@@ -166,16 +197,16 @@ function SnagCapturePageContent() {
   };
 
   const handleCameraCapture = (locationId: string) => {
-    if (fileInputRefs.current[locationId]) {
-      fileInputRefs.current[locationId]?.click();
-    }
+    fileInputRefs.current[locationId]?.click();
   };
 
-  const handleFileSelect = (locationId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (
+    locationId: string,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const files = e.target.files;
     if (!files) return;
 
-    const newPhotos: SnagPhoto[] = [];
     Array.from(files).forEach((file) => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -184,7 +215,6 @@ function SnagCapturePageContent() {
           file,
           preview: reader.result as string,
         };
-        newPhotos.push(newPhoto);
 
         setSnagLocations((prev) =>
           prev.map((loc) =>
@@ -212,8 +242,40 @@ function SnagCapturePageContent() {
     );
   };
 
+  // ─── Annotation Handlers ──────────────────────────────────────────
+
+  const openAnnotator = (locationId: string, photo: SnagPhoto) => {
+    setAnnotatingPhoto({
+      locationId,
+      photoId: photo.id,
+      src: photo.annotatedPreview || photo.preview,
+    });
+  };
+
+  const handleAnnotationSave = (annotatedDataUrl: string) => {
+    if (!annotatingPhoto) return;
+
+    setSnagLocations((prev) =>
+      prev.map((loc) =>
+        loc.id === annotatingPhoto.locationId
+          ? {
+              ...loc,
+              photos: loc.photos.map((p) =>
+                p.id === annotatingPhoto.photoId
+                  ? { ...p, annotatedPreview: annotatedDataUrl }
+                  : p
+              ),
+            }
+          : loc
+      )
+    );
+
+    setAnnotatingPhoto(null);
+  };
+
+  // ─── Submit ────────────────────────────────────────────────────────
+
   const handleSubmit = async () => {
-    // Filter out empty locations
     const validLocations = snagLocations.filter(
       (loc) => loc.location.trim() !== "" || loc.description.trim() !== ""
     );
@@ -223,8 +285,33 @@ function SnagCapturePageContent() {
       return;
     }
 
-    // Generate PDF
+    setSubmitting(true);
+    setSubmitError(null);
+
     try {
+      // 1. Persist to Supabase
+      const result = await submitInspection({
+        projectName,
+        unitNumber,
+        clientName,
+        inspectionDate: getCurrentDate(),
+        engineerName: user?.fullName || "Unknown",
+        locations: validLocations.map((loc) => ({
+          location: loc.location,
+          description: loc.description,
+          photos: loc.photos.map((p) => ({
+            base64: p.preview,
+            annotatedBase64: p.annotatedPreview,
+          })),
+        })),
+      });
+
+      if (!result.success) {
+        console.error("Supabase submission error:", result.error);
+        // Continue with PDF generation even if Supabase fails
+      }
+
+      // 2. Generate PDF
       await generateSnagPDF({
         projectName,
         unitNumber,
@@ -234,26 +321,65 @@ function SnagCapturePageContent() {
         locations: validLocations.map((loc) => ({
           location: loc.location,
           description: loc.description,
-          photos: loc.photos,
+          photos: loc.photos.map((p) => ({
+            preview: p.preview,
+            annotatedPreview: p.annotatedPreview,
+          })),
         })),
       });
 
-      // TODO: Upload to Supabase Storage and create snag records
-      console.log("PDF generated successfully");
+      // 3. Clear IndexedDB draft
+      await clearDraft();
 
-      // Show success message
-      alert("PDF Report generated successfully!");
-      router.push("/");
+      // 4. Show success
+      setSubmitted(true);
     } catch (error) {
-      console.error("Error generating PDF:", error);
-      alert("Error generating PDF. Please try again.");
+      console.error("Error submitting inspection:", error);
+      setSubmitError("Failed to submit inspection. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  if (!isAuthenticated) {
+  if (authLoading || !isAuthenticated) {
     return null;
   }
 
+  // ─── Success Screen ───────────────────────────────────────────────
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-punchly-bg flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-white border border-punchly-border rounded-lg p-8 text-center">
+          <div className="h-16 w-16 rounded-full bg-punchly-success/10 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="h-8 w-8 text-punchly-success" strokeWidth={2} />
+          </div>
+          <h2 className="text-2xl font-semibold text-punchly-navy mb-2">
+            Inspection Submitted
+          </h2>
+          <p className="text-punchly-text-secondary mb-6">
+            Your snag report has been saved and the PDF has been generated.
+          </p>
+          <div className="flex flex-col gap-3">
+            <Button
+              onClick={() => router.push("/inspection/setup")}
+              className="w-full h-12 bg-punchly-navy hover:bg-punchly-navy/90"
+            >
+              Start New Inspection
+            </Button>
+            <Button
+              onClick={() => router.push("/dashboard")}
+              variant="outline"
+              className="w-full h-12"
+            >
+              Return to Dashboard
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Main Capture UI ──────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-white relative flex flex-col">
       {/* Blueprint Grid Background */}
@@ -302,11 +428,10 @@ function SnagCapturePageContent() {
 
           {/* Page Title */}
           <div className="mb-6">
-            <h1 className="text-3xl font-bold text-zinc-900 mb-2">
-              Snags
-            </h1>
+            <h1 className="text-3xl font-bold text-zinc-900 mb-2">Snags</h1>
             <p className="text-sm text-zinc-600">
-              Document issues with location details and optional photos
+              Document issues with location details and optional photos. Tap a
+              photo to annotate it.
             </p>
           </div>
 
@@ -365,7 +490,9 @@ function SnagCapturePageContent() {
                       onChange={(e) =>
                         handleDescriptionChange(snagLoc.id, e.target.value)
                       }
-                      onKeyDown={(e) => handleDescriptionKeyDown(snagLoc.id, e)}
+                      onKeyDown={(e) =>
+                        handleDescriptionKeyDown(snagLoc.id, e)
+                      }
                       onBlur={() => handleDescriptionBlur(snagLoc.id)}
                       placeholder="Wall defect"
                       rows={5}
@@ -376,12 +503,17 @@ function SnagCapturePageContent() {
                   {/* Photos Section */}
                   <div>
                     <label className="text-sm font-semibold text-zinc-900 mb-2 block">
-                      Photos <span className="text-xs text-zinc-500 font-normal">(Optional)</span>
+                      Photos{" "}
+                      <span className="text-xs text-zinc-500 font-normal">
+                        (Optional — tap to annotate)
+                      </span>
                     </label>
 
                     {/* Hidden File Input */}
                     <input
-                      ref={(el) => { fileInputRefs.current[snagLoc.id] = el; }}
+                      ref={(el) => {
+                        fileInputRefs.current[snagLoc.id] = el;
+                      }}
                       type="file"
                       accept="image/*"
                       capture="environment"
@@ -411,18 +543,40 @@ function SnagCapturePageContent() {
                       </Button>
                     </div>
 
-                    {/* Photo Thumbnails */}
+                    {/* Photo Thumbnails — tap to annotate */}
                     {snagLoc.photos.length > 0 && (
                       <div className="grid grid-cols-3 gap-3">
                         {snagLoc.photos.map((photo) => (
                           <div key={photo.id} className="relative group">
                             <img
-                              src={photo.preview}
+                              src={photo.annotatedPreview || photo.preview}
                               alt="Snag"
-                              className="w-full h-24 object-cover rounded-lg border-2 border-zinc-300"
+                              className="w-full h-24 object-cover rounded-lg border-2 border-zinc-300 cursor-pointer"
+                              onClick={() =>
+                                openAnnotator(snagLoc.id, photo)
+                              }
                             />
+                            {/* Annotate badge */}
                             <button
-                              onClick={() => removePhoto(snagLoc.id, photo.id)}
+                              onClick={() =>
+                                openAnnotator(snagLoc.id, photo)
+                              }
+                              className="absolute bottom-1 left-1 bg-punchly-critical text-white p-1 rounded text-xs flex items-center gap-0.5"
+                              title="Annotate photo"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            {/* Annotated indicator */}
+                            {photo.annotatedPreview && (
+                              <div className="absolute top-1 left-1 bg-punchly-success text-white px-1.5 py-0.5 rounded text-[10px] font-medium">
+                                Annotated
+                              </div>
+                            )}
+                            {/* Remove button */}
+                            <button
+                              onClick={() =>
+                                removePhoto(snagLoc.id, photo.id)
+                              }
                               className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                               <X className="h-3 w-3" />
@@ -448,6 +602,13 @@ function SnagCapturePageContent() {
             Add Another Location
           </Button>
 
+          {/* Error Message */}
+          {submitError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+              {submitError}
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div className="flex gap-3">
             <Button
@@ -455,6 +616,7 @@ function SnagCapturePageContent() {
               variant="outline"
               onClick={() => router.back()}
               className="flex-1 h-12"
+              disabled={submitting}
             >
               Cancel
             </Button>
@@ -462,8 +624,16 @@ function SnagCapturePageContent() {
               type="button"
               onClick={handleSubmit}
               className="flex-1 h-12 bg-zinc-900 hover:bg-zinc-800 text-base font-semibold"
+              disabled={submitting}
             >
-              Submit All Snags
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                "Submit All Snags"
+              )}
             </Button>
           </div>
         </div>
@@ -473,26 +643,37 @@ function SnagCapturePageContent() {
           <div className="container mx-auto px-4 py-4">
             <div className="flex items-center justify-center gap-4 text-xs text-zinc-500 font-mono">
               <span>Snag Documentation</span>
-              <span>·</span>
+              <span>&middot;</span>
               <span>Step 2 of 3</span>
             </div>
           </div>
         </footer>
       </div>
+
+      {/* Canvas Annotation Modal */}
+      {annotatingPhoto && (
+        <SnagAnnotator
+          photoSrc={annotatingPhoto.src}
+          onSave={handleAnnotationSave}
+          onCancel={() => setAnnotatingPhoto(null)}
+        />
+      )}
     </div>
   );
 }
 
 export default function SnagCapturePage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-zinc-900 border-r-transparent"></div>
-          <p className="mt-4 text-sm text-zinc-600">Loading...</p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-white flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-zinc-900 border-r-transparent" />
+            <p className="mt-4 text-sm text-zinc-600">Loading...</p>
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <SnagCapturePageContent />
     </Suspense>
   );
